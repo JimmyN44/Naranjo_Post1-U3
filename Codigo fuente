@@ -1,0 +1,100 @@
+Kotlin
+
+data class Task(
+    val id: Long,
+    val title: String,
+    val completed: Boolean = false,
+)
+interface TaskRepository {
+    suspend fun getAllTasks(): List<Task>
+    suspend fun addTask(title: String)
+}
+
+import javax.inject.Inject
+
+class FakeTaskRepository @Inject constructor() : TaskRepository {
+
+    private val tasks = mutableListOf(
+        Task(1, "Estudiar patrones arquitectónicos MVC, MVP y MVVM"),
+        Task(2, "Implementar ViewModel con StateFlow en Android"),
+        Task(3, "Configurar Hilt en el proyecto con KSP"),
+        Task(4, "Escribir test unitario del ViewModel", completed = true),
+    )
+
+    override suspend fun getAllTasks(): List<Task> = tasks.toList()
+
+    override suspend fun addTask(title: String) {
+        tasks.add(Task(id = tasks.size.toLong() + 1, title = title))
+    }
+}
+
+sealed class TaskUiState {
+    object Loading : TaskUiState()
+    data class Success(val tasks: List<Task>) : TaskUiState()
+    data class Error(val message: String) : TaskUiState()
+}
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class TaskViewModel @Inject constructor(
+    private val repository: TaskRepository
+) : ViewModel() {
+
+    private val _uiState = MutableStateFlow<TaskUiState>(TaskUiState.Loading)
+    val uiState: StateFlow<TaskUiState> = _uiState.asStateFlow()
+
+    init {
+        loadTasks()
+    }
+
+    fun loadTasks() {
+        viewModelScope.launch {
+            _uiState.value = TaskUiState.Loading
+            _uiState.value = try {
+                TaskUiState.Success(repository.getAllTasks())
+            } catch (e: Exception) {
+                TaskUiState.Error(e.message ?: "Error al cargar tareas")
+            }
+        }
+    }
+}
+
+import dagger.Binds
+import dagger.Module
+import dagger.hilt.InstallIn
+import dagger.hilt.components.SingletonComponent
+import javax.inject.Singleton
+
+@Module
+@InstallIn(SingletonComponent::class)
+abstract class RepositoryModule {
+
+    @Binds
+    @Singleton
+    abstract fun bindTaskRepository(
+        impl: FakeTaskRepository
+    ): TaskRepository
+}
+
+import android.app.Application
+import dagger.hilt.android.HiltAndroidApp
+
+@HiltAndroidApp
+class MyApp : Application()
+
+@AndroidEntryPoint
+class MainActivity : ComponentActivity() {
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            TaskListScreen()
+        }
+    }
+}
